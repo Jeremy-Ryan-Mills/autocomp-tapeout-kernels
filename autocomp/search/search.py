@@ -23,9 +23,11 @@ from autocomp.backend.gpumode.gpumode_eval import GpuModeEvalBackend
 from autocomp.backend.trn.trn_eval import TrnEvalBackend
 from autocomp.backend.tpu.tpu_eval import TpuEvalBackend
 from autocomp.backend.jaxbench.jaxbench_eval import JaxBenchEvalBackend
+from autocomp.backend.npu.npu_eval import Spring26EvalBackend
 # ... register more eval backends here ...
 # Hardware configs
 from autocomp.hw_config import CudaHardwareConfig, GemminiHardwareConfig, TrnHardwareConfig, TpuHardwareConfig  # noqa: F401 — re-exported for backwards compat
+from autocomp.hw_config.npu_config import Spring26HardwareConfig  # noqa: F401
 
 
 def create_backend_and_agents(backend_name: str, agent_name: str, hw_config, prob: Prob, models: list, code_models: list = None, menu_strategy: str = None, fine_grained_isa: bool = False, example_rate: float = 0.0, cache_dir=None):
@@ -53,6 +55,8 @@ def create_backend_and_agents(backend_name: str, agent_name: str, hw_config, pro
         eval_backend = TpuEvalBackend()
     elif backend_name == "jaxbench":
         eval_backend = JaxBenchEvalBackend()
+    elif backend_name == "npu":
+        eval_backend = Spring26EvalBackend()
     else:
         raise ValueError(f"Unknown backend: {backend_name}")
     
@@ -141,6 +145,13 @@ def load_initial_code(backend_name: str, prob: "Prob") -> str:
                 return f.read()
         from autocomp.backend.jaxbench.jaxbench_eval import extract_workload_code
         return extract_workload_code(prob)
+    elif backend_name == "npu":
+        sol_dir = SOLS_DIR / prob_type
+        matches = list(sol_dir.glob(f"{prob_id}_*.py"))
+        if not matches:
+            raise FileNotFoundError(f"No file matching {prob_id}_*.py in {sol_dir}")
+        with open(matches[0]) as f:
+            return f.read()
     else:
         raise ValueError(f"Unknown backend: {backend_name}")
 

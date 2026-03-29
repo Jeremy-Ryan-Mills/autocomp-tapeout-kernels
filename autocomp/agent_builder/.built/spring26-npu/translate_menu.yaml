@@ -1,0 +1,12 @@
+strategies:
+- strategy: map CUDA or NKI tensor-core matmul calls to matmul.mxu0 or matmul.mxu1, loading weight tiles into the corresponding WB slots with dma.load.mxu0 or dma.load.mxu1
+- strategy: map CUDA global memory loads and NKI nl.load to dma.load + dma.wait pairs, preserving the original memory address and size
+- strategy: map CUDA shared memory stores or NKI nl.store to dma.store + dma.wait
+- strategy: map NKI nisa.activation (relu, gelu, silu, tanh) to the corresponding VPU instruction (vtanh, vexp, vmul, etc.)
+- strategy: map CUDA __syncthreads and NKI compiler barriers to dma.wait with an appropriate flag
+- strategy: translate NKI nisa.nc_matmul to matmul.mxu0, preserving FP8 cast and accumulation semantics
+- strategy: map CUDA reduction over a dimension to vreduce.sum (column-wise) or vrot.reduce.sum (row-wise) as appropriate
+- strategy: translate CUDA or NKI elementwise binary ops (add, sub, mul, div, exp, sqrt, rcp) directly to vadd, vsub, vmul, vrcp, vsqrt, vexp
+- strategy: replace CUDA thread-block loop nests with SALU loop control using addi plus beq or bne branches iterating over MRF tiles
+- strategy: translate CUDA softmax (exp + sum + divide) to vexp + vrot.reduce.sum + vrcp + vmul on the corresponding MRF registers
+- strategy: convert CUDA or NKI BF16 or FP16 tensors loaded as activations to FP8 by casting to fp8_e4m3fn dtype before calling matmul.mxu0

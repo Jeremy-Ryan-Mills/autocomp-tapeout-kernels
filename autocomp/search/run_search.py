@@ -21,6 +21,7 @@ from autocomp.hw_config import (
     GemminiHardwareConfig,
     TrnHardwareConfig,
     TpuHardwareConfig,
+    Spring26HardwareConfig,
 )
 
 
@@ -28,16 +29,17 @@ def main():
     # ------------------------------------------------------------------
     # Target & environment
     # ------------------------------------------------------------------
-    backend_name = "trn"            # "gemmini", "trn", "tpu", "jaxbench", "kernelbench", "gpumode"
-    agent_name = "built:trn-nki1"   # "gemmini", "trn", "cuda", "built:<name>", or path
-    simulator = None                # "firesim"/"spike" for gemmini; "gpumode-local"/"gpumode-cli" for gpumode
-    hw_config = TrnHardwareConfig("trn1.2xlarge")
+    backend_name = "npu"                  # "gemmini", "trn", "tpu", "jaxbench", "kernelbench", "gpumode", "npu"
+    agent_name = "built:spring26-npu"     # "gemmini", "trn", "cuda", "built:<name>", or path
+    simulator = None                      # None for npu; "firesim"/"spike" for gemmini; etc.
+    hw_config = Spring26HardwareConfig()
+    # hw_config = TrnHardwareConfig("trn1.2xlarge")
     # hw_config = GemminiHardwareConfig(pe_dim=16, spad_size_kb=256, acc_size_kb=64)
     # hw_config = CudaHardwareConfig("NVIDIA L40S", "2.5.0", "12.4")
     # hw_config = TpuHardwareConfig("v6e-1")
 
-    prob_type = "trn-tutorial"      # see README.md or sols/ for available problems
-    prob_id = 2
+    prob_type = "npu-kernels"        # see sols/npu-kernels/ for available problems
+    prob_id = 0                      # 0=rms_norm, 1=mlp, 2=attention
 
     # ------------------------------------------------------------------
     # Models
@@ -74,8 +76,8 @@ def main():
     # ------------------------------------------------------------------
     # Translation
     # ------------------------------------------------------------------
-    translate_iters = 0
-    translate_perf_threshold = 15
+    translate_iters = 2
+    translate_perf_threshold = 1.5
     translate_drop_original = True
     translate_score = True
 

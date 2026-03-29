@@ -1,0 +1,3 @@
+[submodule "npu_model"]
+	path = npu_model
+	url = https://github.com/ucb-ee194-tapeout/npu_model

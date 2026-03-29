@@ -1,0 +1,24 @@
+general:
+  - Generated code must define exactly one class named GeneratedProgram that subclasses npu_model.software.Program.
+  - The class must have an 'instructions' class attribute that is a list of npu_model.software.Instruction objects.
+  - Do NOT modify memory_regions in the generated class; the test harness injects canonical input data.
+  - "Every Instruction takes exactly two arguments: a mnemonic string and a dict of named integer arguments."
+  - Only use mnemonics that appear in the ISA reference (isa_docs.md). Invented instruction names will cause a KeyError at simulation time.
+
+planning:
+  - The primary bottleneck is usually DMA latency or matmul latency (~64 cycles). Profile which unit is the limiting factor before proposing compute optimizations.
+  - MXU0 and MXU1 can execute in parallel if they have no data dependency — exploiting both units roughly doubles throughput.
+  - The DMA engine can overlap with both MXU and VPU. Restructure programs so dma.load is issued before compute begins, not after.
+  - Each MXU has exactly 2 WB slots (rd=0 and rd=1). Plan weight loads to fit within this budget; double-buffering is the standard pattern.
+  - Static scheduling means the programmer controls exactly when each unit is busy. Think in terms of a resource timeline, not control flow.
+
+coding:
+  - Every dma.load / dma.store must be paired with a dma.wait(flag=N) using the same flag before the transferred data is consumed or overwritten.
+  - Flag integers must be in range 0–15. Re-use flag values only after their dma.wait has been issued.
+  - matmul.mxu0 reads mrf[rs1] as (64, 32) FP8 — ensure the activation data has been loaded as FP8 bytes, not BF16.
+  - matmul.mxu1 is identical to matmul.mxu0 in semantics but uses its own WB slots (wb_mxu1).
+  - VPU instructions (vadd, vmul, vexp, etc.) interpret MRF registers as (64, 16) BF16. Do not pass FP8-encoded MRF data directly to a VPU instruction without understanding the reinterpretation.
+  - vrot.reduce.sum sums over dim=-1 (columns) and broadcasts; use this for per-row normalization (softmax, LayerNorm). vreduce.sum sums over dim=0 (rows).
+  - After matmul.mxu0, insert a delay instruction of approximately 60–64 cycles before any VPU instruction that reads the matmul output register to avoid hazards.
+  - Use integer literals (not variables) for base addresses and sizes in Instruction args — they are encoded directly into the instruction.
+  - MRF register indices must be integers 0–63. Weight buffer slot indices must be 0 or 1.

@@ -1,0 +1,18 @@
+optimizations:
+- strategy: overlap DMA loads with MXU compute by issuing dma.load early and deferring dma.wait until just before the data is needed
+- strategy: double-buffer MXU weights across the two WB slots so a new weight tile is DMA-loaded while the previous matmul is executing
+- strategy: pipeline multiple matmul.mxu0 instructions back-to-back when activations are independent (each accumulates into a different rd register)
+- strategy: use MXU1 for operations where weights fit in WB_mxu1, freeing MXU0 for concurrent work
+- strategy: hoist dma.load.mxu0 and dma.load.mxu1 as early as possible in the instruction stream to hide weight-fetch latency
+- strategy: replace sequential dma.load pairs with concurrent loads using different flag values to fetch multiple tiles in parallel
+- strategy: fuse consecutive VPU operations on the same MRF register to avoid storing and reloading intermediate results
+- strategy: eliminate redundant dma.wait barriers by merging flag usage
+- strategy: size delay instructions precisely to the actual matmul latency (~64 cycles) instead of conservatively large values
+- strategy: accumulate partial sums across multiple matmul.mxu0 calls into the same rd register before applying VPU post-processing
+- strategy: reorder instructions to keep all five execution units (SALU, MXU0, MXU1, VPU, DMA) busy simultaneously
+- strategy: reduce total DMA bytes by exploiting data reuse — load weights once and reuse across multiple activation tiles
+- strategy: use vrot.reduce.sum for row-wise reductions (softmax denominator, per-row mean) instead of multiple passes
+- strategy: pre-compute reciprocals with vrcp and store in an MRF register to avoid repeated divisions in loop bodies
+- strategy: combine vtrpose.h and vtrpose.l with vadd to transpose an MRF tile in-place, avoiding DRAM round-trips for transposed layouts
+- strategy: split large workloads into tiles that fit in the MRF (64 rows by 16 BF16 columns) and loop over tiles with SALU branch instructions
+- strategy: use SALU addi instructions to stride through DRAM address space in a loop, enabling the DMA to fetch contiguous tiles

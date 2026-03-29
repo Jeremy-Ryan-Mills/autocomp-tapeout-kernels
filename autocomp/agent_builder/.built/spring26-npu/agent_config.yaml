@@ -1,0 +1,20 @@
+agent_name: spring26-npu
+version: '1.0'
+built_at: '2026-03-28T00:00:00+00:00'
+build:
+  main_model: handcrafted
+  light_model: handcrafted
+  agent_scope: >-
+    Optimizing Python-ISA kernel programs for the Spring 26 NPU (Atlas accelerator).
+    The target hardware has a RISC-V scalar unit (SALU), two matrix units (MXU0: 32×16
+    systolic array; MXU1: 16 inner-product trees), a vector unit (VPU, BF16), and a DMA
+    engine.  Kernels are expressed as Python classes subclassing npu_model.software.Program,
+    containing a list of npu_model.software.Instruction objects.  Out of scope: C/CUDA/NKI
+    code generation, multi-chip distribution, host-side Python logic.
+  sources:
+    - type: file
+      path: npu_model/npu_model/configs/isa_definition.py
+    - type: directory
+      path: npu_model/npu_spec
+    - type: directory
+      path: npu_model/npu_model/configs/programs
