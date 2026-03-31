@@ -68,3 +68,81 @@ class GeneratedProgram(Program):
     # memory_regions are provided by the test harness — do not rely on these
     # values during evaluation.
     memory_regions: List[Tuple[int, torch.Tensor]] = []
+
+
+# ── Test data and golden result ───────────────────────────────────────────────
+import os
+import sys
+import tempfile
+
+_g = torch.Generator()
+_g.manual_seed(0)
+INPUT_DATA = torch.randn(64, 16, dtype=torch.bfloat16, generator=_g)
+ROW_SIZE = INPUT_DATA.shape[-1]
+EPS = 1e-6
+
+
+def get_memory_regions():
+    return [
+        (INPUT_BASE,   INPUT_DATA),
+        (EPS_BASE,     torch.full(INPUT_DATA.shape, EPS, dtype=torch.bfloat16)),
+        (DIVISOR_BASE, torch.full(INPUT_DATA.shape, float(ROW_SIZE), dtype=torch.bfloat16)),
+    ]
+
+
+def get_golden_result():
+    x = INPUT_DATA.float()
+    rms = torch.sqrt(x.pow(2).mean(dim=-1, keepdim=True) + EPS)
+    return (OUTPUT_BASE, (x / rms).to(torch.bfloat16))
+
+
+def run_and_check(program_cls=GeneratedProgram) -> bool:
+    import npu_model.configs.isa_definition
+    from npu_model.simulation import Simulation
+    from npu_model.logging import LoggerConfig
+    from npu_model.configs.hardware.default import DefaultHardwareConfig
+
+    program = program_cls()
+    program.memory_regions = get_memory_regions()
+
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        trace_path = f.name
+    try:
+        sim = Simulation(
+            hardware_config=DefaultHardwareConfig(),
+            logger_config=LoggerConfig(filename=trace_path),
+            program=program,
+            verbose=False,
+        )
+        sim.run(max_cycles=200_000)
+        cycles = sim.get_stats()["cycles"]
+    finally:
+        try:
+            os.unlink(trace_path)
+        except OSError:
+            pass
+
+    if cycles >= 200_000:
+        print("FAIL: hit max_cycles limit")
+        return False
+
+    output_base, expected = get_golden_result()
+    raw = sim.core.arch_state.read_memory(output_base, expected.numel() * expected.element_size())
+    actual = raw.view(expected.dtype).reshape(expected.shape)
+
+    if actual.isnan().any() or actual.isinf().any():
+        print("FAIL: output contains NaN or Inf")
+        return False
+
+    if torch.allclose(actual.float(), expected.float(), atol=0.02):
+        print(f"PASS  ({cycles} cycles)")
+        return True
+
+    max_diff = (actual.float() - expected.float()).abs().max().item()
+    print(f"FAIL: max_diff={max_diff:.4f} (atol=0.02)")
+    return False
+
+
+if __name__ == "__main__":
+    ok = run_and_check()
+    sys.exit(0 if ok else 1)

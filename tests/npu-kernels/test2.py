@@ -62,3 +62,93 @@ def get_golden_result():
     )
     expected = (softmax_fp8.float() @ V_pad.float()).to(torch.bfloat16)
     return (OUTPUT_BASE, expected)
+
+
+# ── Kernel (same as sols/npu-kernels/2_gemma_attention_ref.py) ───────────────
+import os
+import sys
+import tempfile
+from typing import List, Tuple
+from npu_model.software import Instruction, Program
+
+_fp8  = torch.float8_e4m3fn
+_bf16 = torch.bfloat16
+_Q_SZ     = SEQ_LEN  * HEAD_DIM * _fp8.itemsize
+_KV_SZ    = HEAD_DIM * HEAD_DIM * _fp8.itemsize
+_SCALE_SZ = SEQ_LEN  * HEAD_DIM * _bf16.itemsize
+_OUT_SZ   = SEQ_LEN  * HEAD_DIM * _bf16.itemsize
+
+
+class GeneratedProgram(Program):
+    instructions: List[Instruction] = [
+        Instruction("dma.load.mxu0", {"rd": 0, "base": KEY_BASE,   "size": _KV_SZ, "flag": 0}),
+        Instruction("dma.load.mxu0", {"rd": 1, "base": VALUE_BASE, "size": _KV_SZ, "flag": 1}),
+        Instruction("dma.wait", {"flag": 0}),
+        Instruction("dma.wait", {"flag": 1}),
+        Instruction("dma.load", {"rd": 0, "base": QUERY_BASE, "size": _Q_SZ,     "flag": 2}),
+        Instruction("dma.load", {"rd": 2, "base": SCALE_BASE, "size": _SCALE_SZ, "flag": 3}),
+        Instruction("dma.wait", {"flag": 2}),
+        Instruction("dma.wait", {"flag": 3}),
+        Instruction("matmul.mxu0", {"rd": 3, "rs1": 0, "rs2": 0}),
+        Instruction("vmul",            {"vrd": 4, "vs1": 3, "vs2": 2}),
+        Instruction("vexp",            {"vrd": 5, "vs1": 4}),
+        Instruction("vrot.reduce.sum", {"vrd": 6, "vs1": 5}),
+        Instruction("vrcp",            {"vrd": 7, "vs1": 6}),
+        Instruction("vmul",            {"vrd": 8, "vs1": 5, "vs2": 7}),
+        Instruction("matmul.mxu0", {"rd": 9, "rs1": 8, "rs2": 1}),
+        Instruction("dma.store", {"rs1": 9, "base": OUTPUT_BASE, "size": _OUT_SZ, "flag": 4}),
+        Instruction("dma.wait", {"flag": 4}),
+    ]
+    memory_regions: List[Tuple[int, torch.Tensor]] = []
+
+
+def run_and_check(program_cls=GeneratedProgram) -> bool:
+    import npu_model.configs.isa_definition
+    from npu_model.simulation import Simulation
+    from npu_model.logging import LoggerConfig
+    from npu_model.configs.hardware.default import DefaultHardwareConfig
+
+    program = program_cls()
+    program.memory_regions = get_memory_regions()
+
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        trace_path = f.name
+    try:
+        sim = Simulation(
+            hardware_config=DefaultHardwareConfig(),
+            logger_config=LoggerConfig(filename=trace_path),
+            program=program,
+            verbose=False,
+        )
+        sim.run(max_cycles=200_000)
+        cycles = sim.get_stats()["cycles"]
+    finally:
+        try:
+            os.unlink(trace_path)
+        except OSError:
+            pass
+
+    if cycles >= 200_000:
+        print("FAIL: hit max_cycles limit")
+        return False
+
+    output_base, expected = get_golden_result()
+    raw = sim.core.arch_state.read_memory(output_base, expected.numel() * expected.element_size())
+    actual = raw.view(expected.dtype).reshape(expected.shape)
+
+    if actual.isnan().any() or actual.isinf().any():
+        print("FAIL: output contains NaN or Inf")
+        return False
+
+    if torch.allclose(actual.float(), expected.float(), atol=0.02):
+        print(f"PASS  ({cycles} cycles)")
+        return True
+
+    max_diff = (actual.float() - expected.float()).abs().max().item()
+    print(f"FAIL: max_diff={max_diff:.4f} (atol=0.02)")
+    return False
+
+
+if __name__ == "__main__":
+    ok = run_and_check()
+    sys.exit(0 if ok else 1)
