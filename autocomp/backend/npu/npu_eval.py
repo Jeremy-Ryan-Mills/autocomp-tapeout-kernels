@@ -154,7 +154,7 @@ class Spring26EvalBackend(EvalBackend):
         """Execute code_str and return the Program subclass defined in it."""
         Simulation, LoggerConfig, DefaultHardwareConfig, Program = _npu_imports()
 
-        namespace: dict = {}
+        namespace: dict = {"__name__": "__not_main__"}
         exec(_EXEC_PREAMBLE + "\n" + code_str, namespace)
 
         # Find the first class that subclasses Program (but isn't Program itself)

@@ -39,7 +39,7 @@ def main():
     # hw_config = TpuHardwareConfig("v6e-1")
 
     prob_type = "npu-kernels"        # see sols/npu-kernels/ for available problems
-    prob_id = 0                      # 0=rms_norm, 1=mlp, 2=attention
+    prob_id = 3                      # 0=rms_norm, 1=mlp, 2=attention
 
     # ------------------------------------------------------------------
     # Models
