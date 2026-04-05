@@ -46,10 +46,7 @@ def main():
     # ------------------------------------------------------------------
     # Format: "provider::model" (openai, anthropic, together, aws, gcp, vllm)
     models = [
-        "aws::us.anthropic.claude-opus-4-5-20251101-v1:0",
-        "aws::zai.glm-4.7",
-        "aws::deepseek.v3.2",
-        "aws::moonshotai.kimi-k2.5",
+        "anthropic::claude-sonnet-4-6",
     ]
     code_models = None  # None = same as planning models
 

@@ -250,10 +250,16 @@ class SearchStrategy:
             logger.info("Loaded %d candidates from previous run %s", num_cands_loaded, src_dir)
         else:
             orig_code_candidate = CodeCandidate(None, None, orig_code)
-            self.evaluate_candidates([orig_code_candidate], self.metric) # Evaluate the initial code
-            if orig_code_candidate.score == float("inf"):
-                raise ValueError("Initial code is incorrect.")
-            self.add_feedback([orig_code_candidate])
+            if self.translate_iters > 0:
+                # In translation mode the initial code is the source (e.g. numpy / NKI)
+                # which cannot be evaluated by the target backend.  Store it as-is so
+                # the LLM can use it as a reference during the translate iterations.
+                logger.info("Translation mode: skipping evaluation of initial source code.")
+            else:
+                self.evaluate_candidates([orig_code_candidate], self.metric) # Evaluate the initial code
+                if orig_code_candidate.score == float("inf"):
+                    raise ValueError("Initial code is incorrect.")
+                self.add_feedback([orig_code_candidate])
             self.repository.add_candidates([orig_code_candidate], 0)  # Add the initial code as the first candidate
             self.repository.save_candidates(0, save_dir)
         initial_code_candidates: list[CodeCandidate] = self.repository.get_candidates(0)
@@ -358,8 +364,12 @@ class SearchStrategy:
                     if all([c.score < p.score for p in c.parent]):
                         cur_candidates.append(c)
                 else:
-                    if c.score < c.parent.score * keep_factor:
-                        if c.score >= c.parent.score:
+                    parent_score = c.parent.score if c.parent is not None else None
+                    if parent_score is None:
+                        # Parent is the unevaluated source (translation mode); keep all valid candidates
+                        cur_candidates.append(c)
+                    elif c.score < parent_score * keep_factor:
+                        if c.score >= parent_score:
                             logger.debug(f"Keep factor used at iter {cur_iter}, candidate\n{c}")
                         cur_candidates.append(c)
         else:
@@ -420,15 +430,22 @@ class SearchStrategy:
         return cur_candidates
 
     def init_wandb(self):
+        import os
+        disabled = os.environ.get("WANDB_DISABLED", "").lower() in ("true", "1", "yes")
         # start a new wandb run to track this script
-        wandb.init(
-            entity=None,
-            # set the wandb project where this run will be logged
-            project=None,
-            # track hyperparameters and run metadata
-            config=vars(self),
-        )
-        logger.info("Initialized wandb run, id: %s", wandb.run.name)
+        try:
+            wandb.init(
+                entity=None,
+                # set the wandb project where this run will be logged
+                project=None,
+                # track hyperparameters and run metadata
+                config=vars(self),
+                mode="disabled" if disabled else None,
+            )
+            if not disabled:
+                logger.info("Initialized wandb run, id: %s", wandb.run.name)
+        except Exception as e:
+            logger.warning("wandb init failed (skipping): %s", e)
 
     def should_early_stop(self, losses: list[float], cur_iter: int) -> bool:
         if self.early_stop_iters <= 0 or cur_iter < self.early_stop_iters + 1:
